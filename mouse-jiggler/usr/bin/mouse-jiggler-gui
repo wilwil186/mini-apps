@@ -1,0 +1,352 @@
+#!/usr/bin/env python3
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GLib, Gdk, GdkPixbuf
+import subprocess
+import os
+import threading
+import time
+import random
+import sys
+
+CONFIG_PATH = '/etc/mouse-jiggler.conf'
+PID_FILE = '/run/mouse-jiggler.pid'
+
+def load_config():
+    cfg = {'INTERVAL': '30', 'THRESHOLD': '60', 'PIXELS': '5', 'VERBOSE': 'false'}
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.split('=', 1)
+                    cfg[k.strip()] = v.strip()
+    return cfg
+
+def save_config(cfg):
+    try:
+        with open(CONFIG_PATH, 'w') as f:
+            f.write('# mouse-jiggler configuration\n')
+            f.write(f'INTERVAL={cfg["INTERVAL"]}\n')
+            f.write(f'THRESHOLD={cfg["THRESHOLD"]}\n')
+            f.write(f'PIXELS={cfg["PIXELS"]}\n')
+            f.write(f'VERBOSE={cfg["VERBOSE"]}\n')
+        return True
+    except PermissionError:
+        return False
+
+def write_pid():
+    try:
+        with open(PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        return True
+    except (OSError, PermissionError):
+        return False
+
+def remove_pid():
+    try:
+        if os.path.exists(PID_FILE):
+            with open(PID_FILE) as f:
+                if f.read().strip() == str(os.getpid()):
+                    os.remove(PID_FILE)
+    except (OSError, PermissionError):
+        pass
+
+
+class JigglerGUI:
+    def __init__(self):
+        self.config = load_config()
+        self.active = False
+        self.worker = None
+        self.stop_ev = threading.Event()
+
+        self.interval = int(self.config.get('INTERVAL', 30))
+        self.threshold = int(self.config.get('THRESHOLD', 60))
+        self.pixels = int(self.config.get('PIXELS', 5))
+        self.verbose = self.config.get('VERBOSE', 'false').lower() == 'true'
+
+        self._build_ui()
+        self._setup_tray()
+        self._refresh_status()
+
+    def _build_ui(self):
+        self.win = Gtk.Window(title='Mouse Jiggler')
+        self.win.set_default_size(420, 480)
+        self.win.set_border_width(12)
+        self.win.connect('delete-event', self._on_close)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+
+        hdr = Gtk.Box(spacing=8)
+        self.status_dot = Gtk.Label()
+        self.status_lbl = Gtk.Label(label='Detenido')
+        self.status_lbl.set_markup('<b>Detenido</b>')
+        hdr.pack_start(self.status_dot, False, False, 0)
+        hdr.pack_start(self.status_lbl, False, False, 0)
+        vbox.pack_start(hdr, False, False, 0)
+
+        frm = Gtk.Frame()
+        hdr_box = Gtk.Box(spacing=6)
+        hdr_lbl = Gtk.Label(label='<b>Configuración</b>')
+        hdr_lbl.set_use_markup(True)
+        help_btn = Gtk.Button(label='🛈')
+        help_btn.set_relief(Gtk.ReliefStyle.NONE)
+        help_btn.set_tooltip_text('Explicación de cada opción')
+        help_btn.connect('clicked', self._show_help)
+        hdr_box.pack_start(hdr_lbl, False, False, 0)
+        hdr_box.pack_end(help_btn, False, False, 0)
+        hdr_box.show_all()
+        frm.set_label_widget(hdr_box)
+
+        grid = Gtk.Grid(column_spacing=10, row_spacing=6, margin=10)
+
+        grid.attach(Gtk.Label(label='Intervalo:', xalign=1), 0, 0, 1, 1)
+        self.sp_interval = Gtk.SpinButton.new_with_range(5, 300, 1)
+        self.sp_interval.set_value(self.interval)
+        self.sp_interval.set_tooltip_text(
+            'Cada cuántos segundos el programa revisa si debe mover el mouse.\n'
+            'Ej: 30 → revisa cada medio minuto.')
+        grid.attach(self.sp_interval, 1, 0, 1, 1)
+        grid.attach(Gtk.Label(label='segundos'), 2, 0, 1, 1)
+
+        grid.attach(Gtk.Label(label='Umbral:', xalign=1), 0, 1, 1, 1)
+        self.sp_threshold = Gtk.SpinButton.new_with_range(10, 600, 1)
+        self.sp_threshold.set_value(self.threshold)
+        self.sp_threshold.set_tooltip_text(
+            'Tiempo sin actividad del usuario antes de empezar a mover.\n'
+            'Ej: 60 → si no tocas teclado/ratón por 1 minuto, activa el movimiento.')
+        grid.attach(self.sp_threshold, 1, 1, 1, 1)
+        grid.attach(Gtk.Label(label='segundos de inactividad'), 2, 1, 1, 1)
+
+        grid.attach(Gtk.Label(label='Píxeles:', xalign=1), 0, 2, 1, 1)
+        self.sp_pixels = Gtk.SpinButton.new_with_range(1, 50, 1)
+        self.sp_pixels.set_value(self.pixels)
+        self.sp_pixels.set_tooltip_text(
+            'Qué tanto se mueve el cursor cada vez.\n'
+            'Ej: 5 → mueve 5px al azar y lo regresa. Es imperceptible.')
+        grid.attach(self.sp_pixels, 1, 2, 1, 1)
+        grid.attach(Gtk.Label(label='píxeles máximos'), 2, 2, 1, 1)
+
+        self.chk_verbose = Gtk.CheckButton(label='Modo verbose (log detallado)')
+        self.chk_verbose.set_active(self.verbose)
+        self.chk_verbose.set_tooltip_text(
+            'Muestra en el log cada revisión, incluso cuando no mueve el mouse.\n'
+            'Útil para verificar que el programa funciona.')
+        grid.attach(self.chk_verbose, 0, 3, 3, 1)
+
+        frm.add(grid)
+        vbox.pack_start(frm, False, False, 0)
+
+        self.btn = Gtk.Button(label='▶ Iniciar')
+        self.btn.set_size_request(200, 40)
+        self.btn.connect('clicked', self._on_toggle)
+        vbox.pack_start(self.btn, False, False, 0)
+
+        lf = Gtk.Frame(label='Log')
+        sw = Gtk.ScrolledWindow()
+        sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.log_buf = Gtk.TextBuffer()
+        self.log_vw = Gtk.TextView.new_with_buffer(self.log_buf)
+        self.log_vw.set_editable(False)
+        self.log_vw.set_cursor_visible(False)
+        sw.add(self.log_vw)
+        lf.add(sw)
+        vbox.pack_start(lf, True, True, 0)
+
+        self.win.add(vbox)
+
+        css = b'''
+        .dot-green { color: #2ecc71; }
+        .dot-red   { color: #e74c3c; }
+        '''
+        prov = Gtk.CssProvider()
+        prov.load_from_data(css)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), prov,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+    def _setup_tray(self):
+        try:
+            icon_theme = Gtk.IconTheme.get_default()
+            pixbuf = icon_theme.load_icon('mouse-jiggler', 22, 0)
+        except:
+            pixbuf = None
+
+        self.tray = Gtk.StatusIcon()
+        if pixbuf:
+            self.tray.set_from_pixbuf(pixbuf)
+        else:
+            self.tray.set_from_icon_name('input-mouse')
+        self.tray.set_tooltip_text('Mouse Jiggler')
+        self.tray.connect('popup-menu', self._tray_menu)
+        self.tray.connect('activate', lambda i: self.win.present())
+
+    def _tray_menu(self, icon, button, time):
+        menu = Gtk.Menu()
+        item = Gtk.MenuItem(label='Mostrar')
+        item.connect('activate', lambda w: self.win.present())
+        menu.append(item)
+
+        self.tray_toggle = Gtk.MenuItem(label='Detener' if self.active else 'Iniciar')
+        self.tray_toggle.connect('activate', lambda w: self._on_toggle(None))
+        menu.append(self.tray_toggle)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        item = Gtk.MenuItem(label='Salir')
+        item.connect('activate', lambda w: self._quit())
+        menu.append(item)
+        menu.show_all()
+        menu.popup(None, None, Gtk.StatusIcon.position_menu, icon, button, time)
+
+    def _refresh_status(self):
+        if self.active:
+            self.status_dot.set_markup('<span color="#2ecc71" size="x-large">●</span>')
+            self.status_lbl.set_markup('<b>Activo</b>')
+            self.btn.set_label('■ Detener')
+        else:
+            self.status_dot.set_markup('<span color="#e74c3c" size="x-large">●</span>')
+            self.status_lbl.set_markup('<b>Detenido</b>')
+            self.btn.set_label('▶ Iniciar')
+        t = 'Detener' if self.active else 'Iniciar'
+        if hasattr(self, 'tray_toggle') and self.tray_toggle:
+            self.tray_toggle.set_label(t)
+
+    def _show_help(self, _btn):
+        d = Gtk.Dialog(
+            title='¿Qué significa cada opción?',
+            transient_for=self.win,
+            flags=0,
+        )
+        d.add_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        d.set_default_size(420, 300)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=16)
+
+        items = [
+            ('Intervalo', 'Cada cuántos segundos el programa revisa\n'
+                          'si debe mover el mouse.\n'
+                          'Ejemplo: 30 → revisa cada medio minuto.'),
+            ('Umbral', 'Cuánto tiempo sin moverte considera\n'
+                       '"inactividad" antes de empezar a jigglear.\n'
+                       'Ejemplo: 60 → si no tocas teclado/ratón\n'
+                       'por 1 minuto, empieza a mover.'),
+            ('Píxeles', 'Qué tanto mueve el mouse cuando lo hace.\n'
+                        'Ejemplo: 5 → mueve 5px al azar\n'
+                        '(izquierda/derecha/arriba/abajo) y lo regresa.\n'
+                        'Es imperceptible pero evita el bloqueo.'),
+        ]
+
+        for title, desc in items:
+            lbl = Gtk.Label()
+            lbl.set_markup(f'<b>{title}</b>\n{desc}')
+            lbl.set_xalign(0)
+            lbl.set_line_wrap(True)
+            content.pack_start(lbl, False, False, 0)
+
+        d.get_content_area().add(content)
+        d.show_all()
+        d.run()
+        d.destroy()
+
+    def _on_toggle(self, _btn):
+        if self.active:
+            self._stop()
+        else:
+            self._start()
+
+    def _start(self):
+        if self.active:
+            return
+        self.interval = int(self.sp_interval.get_value())
+        self.threshold = int(self.sp_threshold.get_value())
+        self.pixels = int(self.sp_pixels.get_value())
+        self.verbose = self.chk_verbose.get_active()
+
+        self.config.update({
+            'INTERVAL': str(self.interval),
+            'THRESHOLD': str(self.threshold),
+            'PIXELS': str(self.pixels),
+            'VERBOSE': str(self.verbose).lower(),
+        })
+        save_config(self.config)
+
+        self.active = True
+        self.stop_ev.clear()
+        self.worker = threading.Thread(target=self._loop, daemon=True)
+        self.worker.start()
+        write_pid()
+        self._refresh_status()
+        self._log('Iniciado')
+
+    def _stop(self):
+        if not self.active:
+            return
+        self.active = False
+        self.stop_ev.set()
+        self.worker = None
+        remove_pid()
+        self._refresh_status()
+        self._log('Detenido')
+
+    def _loop(self):
+        while not self.stop_ev.is_set():
+            try:
+                idle_ms = self._idle()
+                if idle_ms >= self.threshold * 1000:
+                    self._move()
+                    GLib.idle_add(self._log, f'Inactivo {idle_ms//1000}s → moviendo')
+                elif self.verbose:
+                    GLib.idle_add(self._log, f'Activo ({idle_ms//1000}s) — esperando')
+
+                for _ in range(self.interval):
+                    if self.stop_ev.wait(1):
+                        return
+            except Exception as e:
+                GLib.idle_add(self._log, f'Error: {e}')
+                time.sleep(5)
+
+    def _idle(self):
+        try:
+            r = subprocess.run(['xprintidle'], capture_output=True, text=True, timeout=2)
+            return int(r.stdout.strip())
+        except Exception:
+            return 0
+
+    def _move(self):
+        dx = random.randint(-self.pixels, self.pixels)
+        dy = random.randint(-self.pixels, self.pixels)
+        if dx == 0 and dy == 0:
+            dx = self.pixels
+        try:
+            subprocess.run(['xdotool', 'mousemove_relative', '--', str(dx), str(dy)],
+                           capture_output=True, timeout=2)
+            time.sleep(0.3)
+            subprocess.run(['xdotool', 'mousemove_relative', '--', str(-dx), str(-dy)],
+                           capture_output=True, timeout=2)
+        except Exception as e:
+            GLib.idle_add(self._log, f'Error moviendo mouse: {e}')
+
+    def _log(self, msg):
+        ts = time.strftime('%Y-%m-%d %H:%M:%S')
+        self.log_buf.insert_at_cursor(f'{ts}  {msg}\n')
+        mark = self.log_buf.create_mark(None, self.log_buf.get_end_iter(), False)
+        self.log_vw.scroll_to_mark(mark, 0.0, True, 0.0, 1.0)
+
+    def _on_close(self, win, event):
+        self.win.hide()
+        return True
+
+    def _quit(self):
+        self._stop()
+        Gtk.main_quit()
+
+    def run(self):
+        self.win.show_all()
+        Gtk.main()
+
+
+if __name__ == '__main__':
+    JigglerGUI().run()

@@ -23,9 +23,16 @@ fi
 
 chmod 644 "$CONFIG_FILE"
 
-# Habilitar e iniciar servicio systemd si está disponible
 if command -v systemctl &>/dev/null; then
     systemctl daemon-reload 2>/dev/null || true
+fi
+
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+fi
+
+if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database 2>/dev/null || true
 fi
 
 exit 0

@@ -1,9 +1,9 @@
 Package: mouse-jiggler
-Version: 1.0.0
+Version: 1.1.0
 Section: utils
 Priority: optional
 Architecture: all
-Depends: xdotool, xprintidle, systemd
+Depends: xdotool, xprintidle, python3-gi
 Recommends: ydotool
 Maintainer: wilson <wilson@localhost>
 Description: Mouse jiggler — mueve el ratón automáticamente
@@ -12,8 +12,9 @@ Description: Mouse jiggler — mueve el ratón automáticamente
  del usuario. Soporta X11 (xdotool) y Wayland (ydotool).
  .
  Características:
+  * Interfaz gráfica GTK (mouse-jiggler-gui)
   * Movimiento aleatorio (no predecible)
   * Detección inteligente de inactividad (xprintidle)
   * Daemon con PID file
   * Servicio systemd incluido
-  * Configurable vía /etc/mouse-jiggler.conf o CLI
+  * Configurable vía /etc/mouse-jiggler.conf, CLI o GUI

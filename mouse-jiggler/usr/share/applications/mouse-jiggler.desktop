@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Mouse Jiggler
+Comment=Evita el bloqueo de pantalla moviendo el ratón automáticamente
+Keywords=mouse;jiggler;idle;lock;screen
+Exec=mouse-jiggler-gui
+Icon=mouse-jiggler
+Terminal=false
+Type=Application
+Categories=Utility;
+StartupNotify=false
