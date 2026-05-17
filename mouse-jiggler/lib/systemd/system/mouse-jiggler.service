@@ -1,0 +1,16 @@
+[Unit]
+Description=Mouse Jiggler — evita bloqueo de pantalla
+Documentation=man:mouse-jiggler(1)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mouse-jiggler run
+ExecStop=/usr/bin/mouse-jiggler stop
+Restart=on-failure
+RestartSec=5
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+
+[Install]
+WantedBy=default.target

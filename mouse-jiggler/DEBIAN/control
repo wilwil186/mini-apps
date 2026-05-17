@@ -1,0 +1,19 @@
+Package: mouse-jiggler
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: xdotool, xprintidle, systemd
+Recommends: ydotool
+Maintainer: wilson <wilson@localhost>
+Description: Mouse jiggler — mueve el ratón automáticamente
+ Evita que la pantalla se bloquee o el equipo se suspenda
+ moviendo el ratón solo cuando detecta inactividad real
+ del usuario. Soporta X11 (xdotool) y Wayland (ydotool).
+ .
+ Características:
+  * Movimiento aleatorio (no predecible)
+  * Detección inteligente de inactividad (xprintidle)
+  * Daemon con PID file
+  * Servicio systemd incluido
+  * Configurable vía /etc/mouse-jiggler.conf o CLI

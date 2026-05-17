@@ -1,0 +1,223 @@
+#!/bin/bash
+
+set -e
+
+INTERVAL=30
+THRESHOLD=60
+PIXELS=5
+VERBOSE=false
+CONFIG_FILE="/etc/mouse-jiggler.conf"
+PID_DIR="/run"
+PID_FILE="$PID_DIR/mouse-jiggler.pid"
+
+usage() {
+    cat <<EOF
+Uso: mouse-jiggler {start|stop|status|run} [opciones]
+
+Comandos:
+  start       Inicia el daemon en segundo plano
+  stop        Detiene el daemon
+  status      Muestra si el daemon está activo
+  run         Ejecuta en primer plano (para systemd o debugging)
+
+Opciones (solo con 'start' o 'run'):
+  -i, --interval S    Segundos entre movimientos (defecto: $INTERVAL)
+  -t, --threshold S   Segundos de inactividad antes de mover (defecto: $THRESHOLD)
+  -p, --pixels N      Píxeles máximos a mover (defecto: $PIXELS)
+  -c, --config FILE   Ruta del archivo de configuración
+  -v, --verbose       Log detallado a syslog y stdout
+
+Variables de configuración (en $CONFIG_FILE):
+  INTERVAL=30         Segundos entre movimientos
+  THRESHOLD=60        Segundos de inactividad antes de mover
+  PIXELS=5            Píxeles máximos a mover
+  VERBOSE=false       Habilitar log detallado
+EOF
+    exit 0
+}
+
+log() {
+    local msg="[mouse-jiggler] $*"
+    if $VERBOSE; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') $*"
+    fi
+    logger -t "mouse-jiggler" "$*"
+}
+
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        source "$CONFIG_FILE"
+    fi
+}
+
+cleanup() {
+    log "Deteniendo..."
+    rm -f "$PID_FILE"
+    exit 0
+}
+
+is_running() {
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "$PID_FILE"
+    fi
+    return 1
+}
+
+detect_display() {
+    if [[ -n "$WAYLAND_DISPLAY" ]]; then
+        echo "wayland"
+    elif [[ -n "$DISPLAY" ]]; then
+        echo "x11"
+    else
+        echo "unknown"
+    fi
+}
+
+move_mouse() {
+    local dx dy
+    dx=$(( (RANDOM % (PIXELS * 2 + 1)) - PIXELS ))
+    dy=$(( (RANDOM % (PIXELS * 2 + 1)) - PIXELS ))
+
+    if [[ dx -eq 0 && dy -eq 0 ]]; then
+        dx=$PIXELS
+    fi
+
+    local display_server
+    display_server=$(detect_display)
+
+    case "$display_server" in
+        wayland)
+            if command -v ydotool &>/dev/null; then
+                ydotool mousemove_relative -- "$dx" "$dy"
+                sleep 0.3
+                ydotool mousemove_relative -- "$((-dx))" "$((-dy))"
+                log "Movimiento Wayland: ($dx, $dy)"
+            else
+                log "ydotool no instalado — no se pudo mover en Wayland"
+                return 1
+            fi
+            ;;
+        x11)
+            if command -v xdotool &>/dev/null; then
+                xdotool mousemove_relative -- "$dx" "$dy"
+                sleep 0.3
+                xdotool mousemove_relative -- "$((-dx))" "$((-dy))"
+                log "Movimiento X11: ($dx, $dy)"
+            else
+                log "xdotool no instalado"
+                return 1
+            fi
+            ;;
+        *)
+            log "No se detectó $DISPLAY ni $WAYLAND_DISPLAY"
+            return 1
+            ;;
+    esac
+}
+
+get_idle_ms() {
+    if command -v xprintidle &>/dev/null; then
+        xprintidle 2>/dev/null || echo 0
+    else
+        echo 0
+    fi
+}
+
+main_loop() {
+    log "Iniciado | intervalo: ${INTERVAL}s | umbral: ${THRESHOLD}s | píxeles: $PIXELS"
+
+    while true; do
+        local idle_ms idle_sec
+        idle_ms=$(get_idle_ms)
+        idle_sec=$((idle_ms / 1000))
+
+        if [[ $idle_sec -ge $THRESHOLD ]]; then
+            $VERBOSE && log "Inactivo por ${idle_sec}s — moviendo"
+            move_mouse
+        else
+            $VERBOSE && log "Activo (inactivo: ${idle_sec}s) — esperando"
+        fi
+
+        sleep "$INTERVAL"
+    done
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--interval)
+                INTERVAL="$2"; shift 2 ;;
+            -t|--threshold)
+                THRESHOLD="$2"; shift 2 ;;
+            -p|--pixels)
+                PIXELS="$2"; shift 2 ;;
+            -v|--verbose)
+                VERBOSE=true; shift ;;
+            -c|--config)
+                CONFIG_FILE="$2"; shift 2 ;;
+            -h|--help)
+                usage ;;
+            *)
+                echo "Error: opción desconocida — $1"
+                usage ;;
+        esac
+    done
+}
+
+main() {
+    local cmd="${1:-run}"
+    shift 2>/dev/null || true
+
+    case "$cmd" in
+        start)
+            if is_running; then
+                echo "mouse-jiggler ya está corriendo (PID $(cat "$PID_FILE"))"
+                exit 1
+            fi
+            parse_args "$@"
+            load_config
+            "$0" run \
+                ${VERBOSE:+--verbose} \
+                --interval "$INTERVAL" \
+                --threshold "$THRESHOLD" \
+                --pixels "$PIXELS" \
+                --config "$CONFIG_FILE" &
+            local pid=$!
+            mkdir -p "$PID_DIR" 2>/dev/null || true
+            echo "$pid" > "$PID_FILE"
+            echo "mouse-jiggler iniciado (PID $pid)"
+            ;;
+        stop)
+            if is_running; then
+                local pid
+                pid=$(cat "$PID_FILE")
+                kill "$pid" 2>/dev/null && echo "mouse-jiggler detenido" || echo "Error al detener"
+                rm -f "$PID_FILE"
+            else
+                echo "mouse-jiggler no está corriendo"
+            fi
+            ;;
+        status)
+            if is_running; then
+                echo "mouse-jiggler está activo (PID $(cat "$PID_FILE"))"
+            else
+                echo "mouse-jiggler no está corriendo"
+            fi
+            ;;
+        run)
+            parse_args "$@"
+            load_config
+            trap cleanup SIGTERM SIGINT SIGHUP
+            main_loop
+            ;;
+        *)
+            usage ;;
+    esac
+}
+
+main "$@"

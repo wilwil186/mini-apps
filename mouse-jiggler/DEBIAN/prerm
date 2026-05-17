@@ -1,0 +1,9 @@
+#!/bin/bash
+set -e
+
+# Detener el daemon si está corriendo
+if command -v mouse-jiggler &>/dev/null; then
+    mouse-jiggler stop 2>/dev/null || true
+fi
+
+exit 0

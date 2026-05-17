@@ -1,0 +1,60 @@
+.TH MOUSE-JIGGLER 1 "2026-05-17" "1.0.0" "User Commands"
+.SH NAME
+mouse-jiggler \- mueve el ratón automáticamente al detectar inactividad
+.SH SYNOPSIS
+.B mouse-jiggler
+{\fBstart\fR|\fBstop\fR|\fBstatus\fR|\fBrun\fR} [\fIoptions\fR]
+.SH DESCRIPTION
+Evita que la pantalla se bloquee o el equipo se suspenda moviendo
+el ratón solo cuando detecta inactividad real del usuario.
+Soporta X11 (xdotool) y Wayland (ydotool).
+.SH COMMANDS
+.TP
+.B start
+Inicia el daemon en segundo plano.
+.TP
+.B stop
+Detiene el daemon.
+.TP
+.B status
+Muestra si el daemon está activo.
+.TP
+.B run
+Ejecuta en primer plano (para systemd o debugging).
+.SH OPTIONS
+.TP
+\fB\-i\fR, \fB\-\-interval\fR \fIS\fR
+Segundos entre movimientos (defecto: 30).
+.TP
+\fB\-t\fR, \fB\-\-threshold\fR \fIS\fR
+Segundos de inactividad antes de mover (defecto: 60).
+.TP
+\fB\-p\fR, \fB\-\-pixels\fR \fIN\fR
+Píxeles máximos a mover (defecto: 5).
+.TP
+\fB\-c\fR, \fB\-\-config\fR \fIFILE\fR
+Ruta del archivo de configuración.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Log detallado a syslog y stdout.
+.SH FILES
+.TP
+.I /etc/mouse-jiggler.conf
+Archivo de configuración global.
+.SH EXAMPLES
+.TP
+Iniciar con valores por defecto:
+\fBmouse-jiggler start\fR
+.TP
+Iniciar con intervalo de 10s y umbral de 30s:
+\fBmouse-jiggler start \-i 10 \-t 30\fR
+.TP
+Ver estado:
+\fBmouse-jiggler status\fR
+.TP
+Detener:
+\fBmouse-jiggler stop\fR
+.SH DEPENDENCIES
+xdotool, xprintidle, ydotool (opcional para Wayland).
+.SH AUTHORS
+wilson <wilson@localhost>

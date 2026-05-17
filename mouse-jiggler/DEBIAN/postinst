@@ -1,0 +1,31 @@
+#!/bin/bash
+set -e
+
+CONFIG_FILE="/etc/mouse-jiggler.conf"
+
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    cat > "$CONFIG_FILE" << 'EOF'
+# mouse-jiggler configuration
+# Segundos entre movimientos
+INTERVAL=30
+
+# Segundos de inactividad del usuario antes de mover el ratón
+THRESHOLD=60
+
+# Píxeles máximos a mover en cada dirección (+/-)
+PIXELS=5
+
+# Habilitar log detallado (true/false)
+VERBOSE=false
+EOF
+    echo "Configuración por defecto creada en $CONFIG_FILE"
+fi
+
+chmod 644 "$CONFIG_FILE"
+
+# Habilitar e iniciar servicio systemd si está disponible
+if command -v systemctl &>/dev/null; then
+    systemctl daemon-reload 2>/dev/null || true
+fi
+
+exit 0
