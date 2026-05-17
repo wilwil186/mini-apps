@@ -31,16 +31,26 @@ chmod 755 "$BUILD_DIR/DEBIAN/prerm" 2>/dev/null || true
 
 echo "==> Construyendo .deb..."
 fakeroot dpkg-deb --build "$BUILD_DIR" "$OUTPUT"
+GUI_DEB="${DIR}/${NAME}-gui.deb"
+cp "$OUTPUT" "$GUI_DEB"
+
+echo "==> Creando copia mouse-jiggler-gui.deb..."
+cp "$OUTPUT" "$GUI_DEB"
+
+echo "==> Limpiando viejos .deb..."
+rm -f "$DIR/${NAME}"_*.deb.old 2>/dev/null || true
 
 echo "==> Limpiando..."
 rm -rf "$BUILD_DIR"
 
 echo ""
-echo "✅ Paquete creado: $(basename "$OUTPUT")"
-echo "   Tamaño: $(du -h "$OUTPUT" | cut -f1)"
+echo "✅ Paquetes creados:"
+echo "   $(basename "$DIR/${NAME}_${VERSION}_${ARCH}.deb")"
+echo "   mouse-jiggler-gui.deb  (copia para fácil acceso)"
+echo "   Tamaño: $(du -h "$DIR/${NAME}_${VERSION}_${ARCH}.deb" | cut -f1)"
 echo ""
 echo "Para instalar:"
-echo "  sudo dpkg -i $(basename "$OUTPUT")"
+echo "  sudo dpkg -i mouse-jiggler_${VERSION}_${ARCH}.deb"
 echo "  sudo apt-get install -f   # instala dependencias"
 echo ""
 echo "Para usar:"

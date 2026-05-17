@@ -1,3 +1,4 @@
-*.deb
 *.rpm
 tmp/
+!mouse-jiggler-gui.deb
+!mouse-jiggler_*.deb
