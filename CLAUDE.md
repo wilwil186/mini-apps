@@ -1,0 +1,60 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Repository layout
+
+This is a monorepo of small, independent Linux desktop utilities. Each top-level
+directory is a self-contained app with its own language, dependencies and
+packaging — they share no code. Add new apps as sibling directories.
+
+- `mouse-jiggler/` — Bash daemon that moves the mouse to prevent screen lock/suspend, packaged as `.deb`.
+- `crypto-indicator/` — Python 3 GTK tray indicator showing the CoinGecko Top 20 cryptos.
+
+## mouse-jiggler
+
+The whole app lives inside a Debian package tree; the directory layout **is** the
+install layout (`usr/`, `etc/`, `lib/`, `DEBIAN/`). Files are placed where they
+land on the target system, and `build.sh` copies these dirs verbatim into the
+`.deb`.
+
+Key files:
+- `usr/bin/mouse-jiggler` — the daemon/CLI (Bash). Subcommands: `start` (background daemon), `stop`, `status`, `run` (foreground, used by systemd).
+- `usr/bin/mouse-jiggler-gui` — GTK GUI front-end (PyGObject).
+- `etc/mouse-jiggler.conf` — config sourced by the daemon (`INTERVAL`, `THRESHOLD`, `PIXELS`, `VERBOSE`). CLI flags override it.
+- `lib/systemd/system/mouse-jiggler.service` — systemd unit (runs `mouse-jiggler run`).
+
+Architecture note: the daemon auto-detects the display server at runtime —
+`WAYLAND_DISPLAY` → `ydotool`, else X11 → `xdotool`. Idle detection uses
+`xprintidle`; the mouse is only nudged after `THRESHOLD` seconds of real user
+inactivity, then moved and moved back so the cursor doesn't drift. Version is
+hardcoded in both `build.sh` (`VERSION=`) and `DEBIAN/control` — keep them in sync.
+
+Build the package:
+```bash
+cd mouse-jiggler && ./build.sh          # needs fakeroot + dpkg-deb; outputs mouse-jiggler_<ver>_amd64.deb
+```
+Install / run:
+```bash
+sudo dpkg -i mouse-jiggler_1.1.0_amd64.deb && sudo apt-get install -f
+mouse-jiggler start | stop | status     # CLI
+mouse-jiggler-gui                        # GUI
+```
+Runtime deps (declared in `DEBIAN/control`): `xdotool`, `xprintidle`, `python3-gi`; `ydotool` recommended for Wayland.
+
+`mouse-jiggler.spec` is a parallel RPM spec — update it too if changing packaging.
+
+## crypto-indicator
+
+Single-file Python 3 app (`crypto_indicator.py`). No packaging/build step yet;
+run directly:
+```bash
+python3 crypto-indicator/crypto_indicator.py
+```
+It builds an `AppIndicator` (falling back from `AppIndicator3` to
+`AyatanaAppIndicator3`) whose menu is repopulated with CoinGecko market data.
+Network calls run on a background `threading.Thread`; results are marshalled back
+to the GTK main loop via `GLib.idle_add`. Auto-refresh interval and API URL are
+constants at the top of the file.
+
+Deps: `python3-gi`, `gir1.2-appindicator3` (or ayatana), `python3-requests`.
