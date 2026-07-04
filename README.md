@@ -28,10 +28,24 @@ CoinGecko.
 - Refresco automático cada 2 minutos + opción "Actualizar ahora".
 - Escrito en **Python 3** (`PyGObject` + `requests`).
 
+### 🎵 ritmo
+Reproductor de **música de YouTube sin anuncios** (GTK), inspirado en
+[SimpMusic](https://github.com/maxrave-dev/SimpMusic). Extrae el audio directo
+con `yt-dlp` y lo reproduce con GStreamer, así que no hay anuncios en la cadena
+de reproducción.
+
+- Búsqueda en YouTube, favoritos e historial (SQLite).
+- **Radio infinita** con el Mix de YouTube al agotarse la cola.
+- **Letras sincronizadas** (LRCLIB) resaltadas en tiempo real.
+- **SponsorBlock** (salta segmentos que no son música) y temporizador de sueño.
+- Descargas en `m4a` con carátula y metadatos a `~/Música/Ritmo`.
+- Escrito en **Python 3** (`PyGObject` + `yt-dlp` + GStreamer).
+
 ## Estructura
 
 ```
 mini-apps/
 ├── mouse-jiggler/      # Jiggler de ratón con GUI y empaquetado .deb/.rpm
-└── crypto-indicator/   # Indicador de bandeja con el Top 20 de criptos
+├── crypto-indicator/   # Indicador de bandeja con el Top 20 de criptos
+└── ritmo/              # Reproductor de música de YouTube sin anuncios
 ```

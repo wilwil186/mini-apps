@@ -10,6 +10,7 @@ packaging — they share no code. Add new apps as sibling directories.
 
 - `mouse-jiggler/` — Bash daemon that moves the mouse to prevent screen lock/suspend, packaged as `.deb`.
 - `crypto-indicator/` — Python 3 GTK tray indicator showing the CoinGecko Top 20 cryptos.
+- `ritmo/` — Python 3 GTK ad-free YouTube music player inspired by SimpMusic.
 
 ## mouse-jiggler
 
@@ -58,3 +59,36 @@ to the GTK main loop via `GLib.idle_add`. Auto-refresh interval and API URL are
 constants at the top of the file.
 
 Deps: `python3-gi`, `gir1.2-appindicator3` (or ayatana), `python3-requests`.
+
+## ritmo
+
+Single-file Python 3 GTK 3 app (`ritmo.py`), no build step:
+```bash
+python3 ritmo/ritmo.py
+```
+An ad-free YouTube music player inspired by SimpMusic. Ad blocking is
+architectural: `yt-dlp` resolves the direct audio stream URL and GStreamer
+`playbin` (audio-only flags) plays it — the YouTube web player is never loaded.
+
+Key pieces, all in `ritmo.py`:
+- **Network services** (module-level functions, always called from background
+  threads via `run_async`, results marshalled with `GLib.idle_add`):
+  `search_youtube` (yt-dlp flat search), `resolve_stream` (tries
+  `_STREAM_CONFIGS` in order — default web client first, then the `android`
+  player client as fallback for old distro yt-dlp versions), `fetch_radio`
+  (YouTube Mix `RD<id>` playlist for endless play), `fetch_lyrics` (LRCLIB
+  synced lyrics, with title cleanup + fuzzy search fallback),
+  `fetch_sponsor_segments` (SponsorBlock), `download_track` (m4a + embedded
+  thumbnail/metadata, needs ffmpeg).
+- **`Library`** — SQLite persistence (favorites, history/local scrobble) at
+  `~/.local/share/ritmo/ritmo.db`; opens a connection per call so it is
+  thread-safe.
+- **`Player`** — GStreamer playbin wrapper; a 500 ms GLib tick drives the seek
+  bar, synced-lyrics highlighting and SponsorBlock skips.
+- **`RitmoApp`** — GTK window: sidebar stack (search/favorites/history/queue/
+  downloads), lyrics side panel (revealer), bottom player bar. Activating a row
+  makes the visible list the play queue; a stale-token counter
+  (`_play_token`) discards async results from superseded track selections.
+
+Deps: `python3-gi`, `gir1.2-gtk-3.0`, GStreamer plugins (good/bad),
+`yt-dlp`, `python3-requests`, `ffmpeg`. Downloads go to `~/Música/Ritmo`.
