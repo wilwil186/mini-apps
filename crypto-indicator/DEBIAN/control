@@ -1,0 +1,14 @@
+Package: crypto-indicator
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3, python3-gi, python3-requests, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1
+Recommends: gnome-shell-extension-appindicator
+Maintainer: Wilson Eduardo Jerez Hernández <edujerezwilson@gmail.com>
+Description: Indicador de criptomonedas para la barra del sistema
+ Muestra el precio de Bitcoin directamente en la barra superior y un
+ menú desplegable con el Top 20 de criptomonedas de CoinGecko: precio,
+ cambio 24h, máximos/mínimos, capitalización y volumen por moneda.
+ Solo consulta la red cuando hay conexión y se actualiza solo al
+ reconectar. Arranca automáticamente al iniciar sesión.

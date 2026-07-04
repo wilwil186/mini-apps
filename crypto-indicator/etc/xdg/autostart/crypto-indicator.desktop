@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Crypto Indicator
+Comment=Precio de criptomonedas en la barra del sistema
+Exec=crypto-indicator
+Icon=crypto-indicator
+Terminal=false
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

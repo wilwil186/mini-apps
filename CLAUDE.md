@@ -50,18 +50,23 @@ Runtime deps (declared in `DEBIAN/control`): `xdotool`, `xprintidle`, `python3-g
 
 ## crypto-indicator
 
-Single-file Python 3 app (`crypto_indicator.py`). No packaging/build step yet;
-run directly:
+Single-file Python 3 app (`crypto_indicator.py`); run directly or build a `.deb`
+(same packaging pattern as ritmo — see `crypto-indicator/CLAUDE.md` for details):
 ```bash
-python3 crypto-indicator/crypto_indicator.py
+python3 crypto-indicator/crypto_indicator.py    # run from source
+cd crypto-indicator && ./build.sh               # outputs crypto-indicator_<ver>_all.deb
 ```
 It builds an `AppIndicator` (falling back from `AppIndicator3` to
-`AyatanaAppIndicator3`) whose menu is repopulated with CoinGecko market data.
+`AyatanaAppIndicator3`) that shows the Bitcoin price as a permanent panel label
+and repopulates its menu with CoinGecko Top-20 data (per-coin detail submenus).
 Network calls run on a background `threading.Thread`; results are marshalled back
-to the GTK main loop via `GLib.idle_add`. Auto-refresh interval and API URL are
-constants at the top of the file.
+to the GTK main loop via `GLib.idle_add`. `Gio.NetworkMonitor` gates fetches when
+offline and triggers a refresh on reconnect. Auto-refresh interval and API URL are
+constants at the top of the file. Version is hardcoded in `crypto_indicator.py`
+(`VERSION`), `build.sh` and `DEBIAN/control` — keep the three in sync.
 
-Deps: `python3-gi`, `gir1.2-appindicator3` (or ayatana), `python3-requests`.
+Deps: `python3-gi`, `gir1.2-appindicator3` (or ayatana), `python3-requests`;
+on GNOME Shell the `gnome-shell-extension-appindicator` extension must be enabled.
 
 ## ritmo
 
