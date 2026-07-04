@@ -6,7 +6,9 @@ Inspirado en SimpMusic (https://github.com/maxrave-dev/SimpMusic):
 reproduce música de YouTube sin anuncios (extrae el stream de audio
 directo con yt-dlp, nunca carga el reproductor web), con favoritos,
 historial, descargas, letras sincronizadas (LRCLIB), radio infinita
-(Mix de YouTube), SponsorBlock y temporizador de sueño.
+(Mix de YouTube), SponsorBlock, temporizador de sueño y cuenta de
+Google (importa la sesión del navegador, como el login de SimpMusic:
+Me gusta de YouTube Music, resultados personalizados y Premium).
 
 Dependencias: python3-gi, gir1.2-gtk-3.0, GStreamer (playbin),
               yt-dlp, python3-requests, ffmpeg (para descargas).
@@ -17,6 +19,8 @@ Uso:  python3 ritmo.py
 import os
 import re
 import json
+import time
+import hashlib
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -31,15 +35,21 @@ import requests  # noqa: E402
 import yt_dlp  # noqa: E402
 
 APP_NAME = "Ritmo"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 DATA_DIR = os.path.join(GLib.get_user_data_dir(), "ritmo")
 DB_PATH = os.path.join(DATA_DIR, "ritmo.db")
+CONFIG_DIR = os.path.join(GLib.get_user_config_dir(), "ritmo")
+COOKIES_FILE = os.path.join(CONFIG_DIR, "cookies.txt")
+ACCOUNT_FILE = os.path.join(CONFIG_DIR, "account.json")
 MUSIC_DIR = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_MUSIC) or os.path.expanduser("~/Música")
 DOWNLOAD_DIR = os.path.join(MUSIC_DIR, "Ritmo")
 
 SEARCH_LIMIT = 20
 RADIO_LIMIT = 25
+LIKED_LIMIT = 100
+LIKED_PLAYLIST_URL = "https://music.youtube.com/playlist?list=LM"
+ACCOUNT_MENU_API = "https://www.youtube.com/youtubei/v1/account/account_menu"
 LRCLIB_API = "https://lrclib.net/api/get"
 SPONSORBLOCK_API = "https://sponsor.ajay.app/api/skipSegments"
 SPONSORBLOCK_CATEGORIES = ["sponsor", "selfpromo", "music_offtopic"]
@@ -160,6 +170,10 @@ class Library:
 
 def _ydl(extra=None):
     opts = {"quiet": True, "no_warnings": True, "noplaylist": True}
+    # Con la cuenta de Google conectada, todas las peticiones a YouTube
+    # llevan la sesión: resultados personalizados, Me gusta y Premium.
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
     if extra:
         opts.update(extra)
     return yt_dlp.YoutubeDL(opts)
@@ -178,6 +192,166 @@ def search_youtube(query):
     """Busca en YouTube y devuelve una lista de Track."""
     with _ydl({"extract_flat": True}) as ydl:
         info = ydl.extract_info(f"ytsearch{SEARCH_LIMIT}:{query}", download=False)
+    return [_entry_to_track(e) for e in info.get("entries") or [] if e.get("id")]
+
+
+# ---------------------------------------------------------------------------
+# Cuenta de Google (mismo mecanismo que el login de SimpMusic: se reutiliza
+# la sesión web de YouTube — cookies — en lugar de un OAuth propio)
+# ---------------------------------------------------------------------------
+
+SUPPORTED_BROWSERS = ["firefox", "chrome", "chromium", "brave", "edge", "opera", "vivaldi"]
+
+
+def account_connected():
+    return os.path.exists(COOKIES_FILE)
+
+
+def load_account():
+    """Cuenta guardada ({name, email}) o None si no hay sesión."""
+    if not account_connected():
+        return None
+    try:
+        with open(ACCOUNT_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"name": "Cuenta de Google", "email": ""}
+
+
+def google_logout():
+    for path in (COOKIES_FILE, ACCOUNT_FILE):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def _load_cookie_jar(path):
+    jar = yt_dlp.cookies.YoutubeDLCookieJar(path)
+    jar.load(ignore_discard=True, ignore_expires=True)
+    return jar
+
+
+def _save_google_cookies(src_jar):
+    """Guarda en COOKIES_FILE solo las cookies de Google/YouTube del jar."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    jar = yt_dlp.cookies.YoutubeDLCookieJar(COOKIES_FILE)
+    for c in src_jar:
+        if c.domain.endswith("youtube.com") or c.domain.endswith("google.com"):
+            jar.set_cookie(c)
+    jar.save(ignore_discard=True, ignore_expires=True)
+    os.chmod(COOKIES_FILE, 0o600)
+
+
+def _sapisidhash(sapisid, origin="https://www.youtube.com"):
+    """Cabecera Authorization que YouTube exige junto a las cookies."""
+    ts = int(time.time())
+    digest = hashlib.sha1(f"{ts} {sapisid} {origin}".encode()).hexdigest()
+    return f"SAPISIDHASH {ts}_{digest}"
+
+
+def _find_key(obj, key):
+    """Busca recursivamente la primera aparición de `key` en el JSON."""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for v in obj.values():
+            found = _find_key(v, key)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _find_key(v, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _yt_text(node):
+    if isinstance(node, dict):
+        return node.get("simpleText") or "".join(r.get("text", "") for r in node.get("runs", []))
+    return node or ""
+
+
+def fetch_account_info():
+    """Pide a la API interna de YouTube el nombre y correo de la sesión.
+    Falla (RuntimeError) si las cookies no contienen una sesión iniciada."""
+    jar = _load_cookie_jar(COOKIES_FILE)
+    # El SAPISID debe ser el de .youtube.com y las cookies deben viajar con
+    # su dominio (un dict aplanado hace que YouTube trate la petición como
+    # anónima), por eso se usa una Session con el jar completo.
+    sapisid = next((c.value for c in jar if c.name == "SAPISID" and "youtube" in c.domain), None)
+    if not sapisid:
+        raise RuntimeError("no hay una sesión de Google iniciada en esas cookies")
+    session = requests.Session()
+    session.cookies = jar
+    origin = "https://www.youtube.com"
+    r = session.post(
+        ACCOUNT_MENU_API,
+        params={"prettyPrint": "false"},
+        json={"context": {"client": {"clientName": "WEB", "clientVersion": "2.20250101.00.00", "hl": "es"}}},
+        headers={
+            "Authorization": _sapisidhash(sapisid, origin),
+            "Origin": origin,
+            "X-Origin": origin,
+            "X-Goog-AuthUser": "0",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+        },
+        timeout=HTTP_TIMEOUT,
+    )
+    if r.status_code == 401:
+        raise RuntimeError("la sesión caducó; vuelve a iniciar sesión en el navegador")
+    r.raise_for_status()
+    data = r.json()
+    ctx = data.get("responseContext", {}).get("mainAppWebResponseContext", {})
+    if ctx.get("loggedOut", False):
+        raise RuntimeError("no hay una sesión de Google iniciada en ese navegador")
+    account = {
+        "name": _yt_text(_find_key(data, "accountName")) or "Cuenta de Google",
+        "email": _yt_text(_find_key(data, "email")),
+    }
+    with open(ACCOUNT_FILE, "w", encoding="utf-8") as f:
+        json.dump(account, f)
+    return account
+
+
+def google_connect_browser(browser):
+    """Conecta la cuenta importando la sesión de Google del navegador
+    (equivalente al inicio de sesión con WebView de SimpMusic)."""
+    if browser not in ("firefox",):
+        # Los navegadores Chromium cifran las cookies con el llavero del
+        # escritorio; yt-dlp necesita secretstorage para descifrarlas.
+        try:
+            import secretstorage  # noqa: F401
+        except ImportError:
+            raise RuntimeError(
+                f"para importar cookies de {browser} instala python3-secretstorage "
+                "(sudo apt install python3-secretstorage)")
+    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True,
+                           "cookiesfrombrowser": (browser,)}) as ydl:
+        _save_google_cookies(ydl.cookiejar)
+    try:
+        return fetch_account_info()
+    except Exception:
+        google_logout()
+        raise
+
+
+def google_connect_cookies_file(path):
+    """Conecta la cuenta desde un cookies.txt (formato Netscape) exportado
+    con una extensión del navegador."""
+    _save_google_cookies(_load_cookie_jar(path))
+    try:
+        return fetch_account_info()
+    except Exception:
+        google_logout()
+        raise
+
+
+def fetch_liked_songs():
+    """Playlist LM de YouTube Music: canciones marcadas con Me gusta."""
+    with _ydl({"extract_flat": True, "noplaylist": False, "playlistend": LIKED_LIMIT}) as ydl:
+        info = ydl.extract_info(LIKED_PLAYLIST_URL, download=False)
     return [_entry_to_track(e) for e in info.get("entries") or [] if e.get("id")]
 
 
@@ -556,6 +730,7 @@ class RitmoApp:
         self.hist_list = self._make_track_list("history", "Historial")
         self.queue_list = self._make_track_list("queue", "Cola")
         self._build_downloads_page()
+        self._build_account_page()
         self.stack.connect("notify::visible-child-name", lambda *_: self._refresh_current_page())
 
         # Panel lateral de letras
@@ -579,6 +754,7 @@ class RitmoApp:
 
         self.win.show_all()
         self.lyrics_revealer.set_reveal_child(False)
+        self._update_account_ui()
 
     def _make_track_list(self, name, title):
         scroll = Gtk.ScrolledWindow()
@@ -595,6 +771,65 @@ class RitmoApp:
         self.dl_list.set_selection_mode(Gtk.SelectionMode.NONE)
         scroll.add(self.dl_list)
         self.stack.add_titled(scroll, "downloads", "Descargas")
+
+    def _build_account_page(self):
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        for setter in (vbox.set_margin_top, vbox.set_margin_bottom,
+                       vbox.set_margin_start, vbox.set_margin_end):
+            setter(14)
+
+        self.account_label = Gtk.Label(xalign=0)
+        self.account_label.set_line_wrap(True)
+        vbox.pack_start(self.account_label, False, False, 0)
+
+        # Controles sin sesión: elegir navegador e importar su sesión de Google
+        self.login_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(Gtk.Label(label="Navegador:"), False, False, 0)
+        self.browser_combo = Gtk.ComboBoxText()
+        for b in SUPPORTED_BROWSERS:
+            self.browser_combo.append_text(b)
+        self.browser_combo.set_active(0)
+        row.pack_start(self.browser_combo, False, False, 0)
+        connect_btn = Gtk.Button(label="Conectar con Google")
+        connect_btn.get_style_context().add_class("suggested-action")
+        connect_btn.connect("clicked", self._on_google_connect)
+        row.pack_start(connect_btn, False, False, 0)
+        import_btn = Gtk.Button(label="Importar cookies.txt…")
+        import_btn.set_tooltip_text("Archivo de cookies en formato Netscape exportado con una extensión del navegador")
+        import_btn.connect("clicked", self._on_import_cookies)
+        row.pack_start(import_btn, False, False, 0)
+        self.login_box.pack_start(row, False, False, 0)
+        help_lbl = Gtk.Label(xalign=0)
+        help_lbl.set_markup(
+            "<small>Inicia sesión con tu cuenta de Google en <b>youtube.com</b> en el navegador elegido y "
+            "pulsa «Conectar»: Ritmo importa esa sesión, igual que hace SimpMusic con su WebView.\n"
+            "Con Chrome/Chromium/Brave conviene cerrar el navegador antes de conectar.</small>")
+        help_lbl.set_line_wrap(True)
+        self.login_box.pack_start(help_lbl, False, False, 0)
+        vbox.pack_start(self.login_box, False, False, 0)
+
+        # Controles con sesión iniciada
+        self.logged_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        refresh_btn = Gtk.Button(label="Actualizar Me gusta")
+        refresh_btn.connect("clicked", lambda *_: self._load_liked())
+        self.logged_box.pack_start(refresh_btn, False, False, 0)
+        logout_btn = Gtk.Button(label="Cerrar sesión")
+        logout_btn.connect("clicked", self._on_google_logout)
+        self.logged_box.pack_start(logout_btn, False, False, 0)
+        vbox.pack_start(self.logged_box, False, False, 0)
+
+        vbox.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        self.liked_list = Gtk.ListBox()
+        self.liked_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.liked_list.connect("row-activated", self._on_row_activated, "account")
+        scroll.add(self.liked_list)
+        vbox.pack_start(scroll, True, True, 0)
+
+        self._liked_loaded = False
+        self.stack.add_titled(vbox, "account", "Cuenta")
 
     def _build_sleep_menu(self):
         btn = Gtk.MenuButton()
@@ -683,6 +918,10 @@ class RitmoApp:
             self._fill_list(self.queue_list, self.queue)
         elif name == "downloads":
             self._refresh_downloads()
+        elif name == "account":
+            self._update_account_ui()
+            if account_connected() and not self._liked_loaded:
+                self._load_liked()
 
     def _fill_list(self, listbox, tracks, removable_fav=False):
         for child in listbox.get_children():
@@ -709,6 +948,74 @@ class RitmoApp:
             row.set_margin_top(4)
             self.dl_list.add(row)
         self.dl_list.show_all()
+
+    # -- Cuenta de Google ------------------------------------------------------
+
+    def _update_account_ui(self):
+        account = load_account()
+        if account:
+            name = GLib.markup_escape_text(account.get("name") or "Cuenta de Google")
+            email = GLib.markup_escape_text(account.get("email") or "")
+            self.account_label.set_markup(
+                f"<b>Conectado como {name}</b>\n<small>{email}</small>\n"
+                "Tus «Me gusta» de YouTube Music; la búsqueda y la radio ya usan tu cuenta.")
+            self.login_box.hide()
+            self.logged_box.show()
+        else:
+            self.account_label.set_markup(
+                "<b>Cuenta de Google</b>\n"
+                "Conecta tu cuenta para ver tus «Me gusta» de YouTube Music, "
+                "resultados personalizados y tu suscripción Premium (sin anuncios ni límites).")
+            self.logged_box.hide()
+            self.login_box.show()
+
+    def _on_google_connect(self, _btn):
+        browser = self.browser_combo.get_active_text()
+        self.status(f"Conectando con la sesión de Google de {browser}…")
+        run_async(google_connect_browser, self._on_google_done, browser)
+
+    def _on_import_cookies(self, _btn):
+        dialog = Gtk.FileChooserDialog(title="Elegir cookies.txt", parent=self.win,
+                                       action=Gtk.FileChooserAction.OPEN)
+        dialog.add_buttons("Cancelar", Gtk.ResponseType.CANCEL, "Abrir", Gtk.ResponseType.OK)
+        filt = Gtk.FileFilter()
+        filt.set_name("Cookies (*.txt)")
+        filt.add_pattern("*.txt")
+        dialog.add_filter(filt)
+        if dialog.run() == Gtk.ResponseType.OK:
+            path = dialog.get_filename()
+            self.status("Importando cookies…")
+            run_async(google_connect_cookies_file, self._on_google_done, path)
+        dialog.destroy()
+
+    def _on_google_done(self, account, err):
+        if err:
+            self.status(f"No se pudo conectar la cuenta: {err}")
+            return
+        self._update_account_ui()
+        self.status(f"Cuenta de Google conectada: {account.get('name')} ✓")
+        self._load_liked()
+
+    def _on_google_logout(self, _btn):
+        google_logout()
+        self._liked_loaded = False
+        self._fill_list(self.liked_list, [])
+        self._update_account_ui()
+        self.status("Sesión de Google cerrada")
+
+    def _load_liked(self):
+        if not account_connected():
+            return
+        self.status("Cargando tus Me gusta de YouTube Music…")
+        run_async(fetch_liked_songs, self._on_liked)
+
+    def _on_liked(self, tracks, err):
+        if err:
+            self.status(f"No se pudieron cargar los Me gusta: {err}")
+            return
+        self._liked_loaded = True
+        self._fill_list(self.liked_list, tracks)
+        self.status(f"{len(tracks)} canciones en tus Me gusta ♥")
 
     # -- Búsqueda ------------------------------------------------------------
 

@@ -1,0 +1,26 @@
+Package: ritmo
+Version: 1.1.0
+Section: sound
+Priority: optional
+Architecture: all
+Maintainer: Wilson Eduardo Jerez Hernández <edujerezwilson@gmail.com>
+Depends: python3 (>= 3.8), python3-gi, gir1.2-gtk-3.0, gir1.2-gstreamer-1.0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, python3-requests, yt-dlp, ffmpeg
+Recommends: python3-secretstorage
+Description: Reproductor de música de YouTube sin anuncios para Linux
+ Ritmo es un reproductor de música inspirado en SimpMusic. Reproduce
+ música de YouTube sin anuncios: yt-dlp extrae el stream de audio
+ directo y GStreamer lo reproduce (nunca se carga el reproductor web).
+ .
+ Características:
+  * Búsqueda de canciones y artistas en YouTube
+  * Cuenta de Google: importa la sesión del navegador para ver tus
+    "Me gusta" de YouTube Music, resultados personalizados y Premium
+  * Favoritos e historial persistentes (SQLite)
+  * Radio infinita (Mix de YouTube)
+  * Descargas m4a con metadatos y carátula (ffmpeg)
+  * Letras sincronizadas (LRCLIB)
+  * Saltos automáticos de SponsorBlock
+  * Temporizador de sueño y cola de reproducción
+ .
+ python3-secretstorage se recomienda para importar cookies de
+ navegadores basados en Chromium.

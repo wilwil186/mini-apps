@@ -1,0 +1,3 @@
+#!/bin/sh
+# Lanzador de Ritmo — la app real vive en /usr/share/ritmo/ritmo.py
+exec python3 /usr/share/ritmo/ritmo.py "$@"

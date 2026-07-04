@@ -12,6 +12,11 @@ reproducción.
 ## ✨ Funciones
 
 - 🔍 **Búsqueda** de canciones y artistas en YouTube.
+- 👤 **Cuenta de Google** (como el login de SimpMusic): importa la sesión de tu
+  navegador (Firefox, Chrome, Chromium, Brave…) o un `cookies.txt`, y Ritmo
+  muestra tus **Me gusta** de YouTube Music, personaliza búsqueda/radio con tu
+  cuenta y aprovecha tu suscripción **Premium** si la tienes. La sesión se
+  guarda en `~/.config/ritmo/cookies.txt` (solo lectura para tu usuario).
 - ▶️ **Streaming sin anuncios** (audio directo vía `yt-dlp` + GStreamer `playbin`).
 - ⭐ **Favoritos** persistentes (SQLite en `~/.local/share/ritmo/ritmo.db`).
 - 🕘 **Historial** de reproducción (scrobble local, como SimpMusic).
@@ -35,13 +40,29 @@ sudo apt install python3-gi gir1.2-gtk-3.0 python3-requests yt-dlp ffmpeg \
 
 > **Nota**: si el `yt-dlp` de tu distro es viejo, Ritmo recurre automáticamente
 > al cliente `android` de YouTube (audio AAC ~128 kbps). Con un `yt-dlp`
-> actualizado (`pipx install yt-dlp`) obtendrás los formatos de audio de mayor
-> calidad.
+> actualizado obtendrás mejor calidad de audio, y además es **necesario** para
+> que la lista de «Me gusta» de la cuenta de Google se llene (el de Debian
+> estable no parsea el formato nuevo de YouTube y devuelve una lista vacía):
+> ```bash
+> pip install --user --break-system-packages -U yt-dlp
+> ```
+
+## 📦 Instalación con .deb (recomendado)
+
+```bash
+./build.sh                              # necesita fakeroot + dpkg-deb
+sudo apt install ./ritmo_1.1.0_all.deb  # instala también las dependencias
+```
+
+Queda disponible como `ritmo` en la terminal y como **Ritmo** en el menú de
+aplicaciones. `python3-secretstorage` (Recommends) hace falta para importar
+cookies de navegadores basados en Chromium.
 
 ## 🚀 Uso
 
 ```bash
-python3 ritmo.py
+ritmo              # instalado con el .deb
+python3 ritmo.py   # o directamente desde el repositorio
 ```
 
 1. Escribe en la barra de búsqueda y pulsa Enter.
@@ -50,6 +71,18 @@ python3 ritmo.py
 3. ⭐ para guardarla en favoritos, ⬇ para descargarla.
 4. Con la **radio** activada (botón junto al volumen), la música no se detiene:
    al acabar la cola se añaden canciones similares automáticamente.
+5. En la página **Cuenta** de la barra lateral: inicia sesión en `youtube.com`
+   con tu navegador, elígelo en el desplegable y pulsa **Conectar con Google**.
+   (Con Chrome/Chromium/Brave cierra el navegador antes de conectar; con
+   Firefox no hace falta.)
+
+## 📱 ¿Y en Android?
+
+Ritmo es Python + GTK, tecnología de escritorio Linux: no se puede compilar a
+APK. El equivalente Android es el propio
+[fork de SimpMusic](https://github.com/wilwil186/SimpMusic), que ya publica un
+`SimpMusic-Android.apk` firmado en sus releases (y se puede compilar en local
+con `./gradlew androidApp:assembleDebug`).
 
 ## ⚖️ Aviso
 

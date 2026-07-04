@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Ritmo
+GenericName=Reproductor de música
+Comment=Música de YouTube sin anuncios, con cuenta de Google, letras y radio infinita
+Exec=ritmo
+Icon=ritmo
+Terminal=false
+Categories=AudioVideo;Audio;Player;Music;
+Keywords=música;music;youtube;player;reproductor;
+StartupNotify=true

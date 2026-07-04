@@ -62,10 +62,17 @@ Deps: `python3-gi`, `gir1.2-appindicator3` (or ayatana), `python3-requests`.
 
 ## ritmo
 
-Single-file Python 3 GTK 3 app (`ritmo.py`), no build step:
+Single-file Python 3 GTK 3 app (`ritmo.py`); run directly or build a `.deb`:
 ```bash
-python3 ritmo/ritmo.py
+python3 ritmo/ritmo.py                  # run from source
+cd ritmo && ./build.sh                  # needs fakeroot + dpkg-deb; outputs ritmo_<ver>_all.deb
 ```
+Unlike mouse-jiggler, the app source lives at the top (`ritmo.py`); `build.sh`
+copies it into `usr/share/ritmo/` inside the package, plus the `usr/` tree
+(`usr/bin/ritmo` launcher, `.desktop`, scalable SVG icon) and `DEBIAN/control`.
+Version is hardcoded in `ritmo.py` (`VERSION`), `build.sh` and
+`DEBIAN/control` — keep the three in sync.
+
 An ad-free YouTube music player inspired by SimpMusic. Ad blocking is
 architectural: `yt-dlp` resolves the direct audio stream URL and GStreamer
 `playbin` (audio-only flags) plays it — the YouTube web player is never loaded.
@@ -80,6 +87,16 @@ Key pieces, all in `ritmo.py`:
   synced lyrics, with title cleanup + fuzzy search fallback),
   `fetch_sponsor_segments` (SponsorBlock), `download_track` (m4a + embedded
   thumbnail/metadata, needs ffmpeg).
+- **Google account** (SimpMusic-style login via browser session, no OAuth):
+  `google_connect_browser` imports YouTube/Google cookies from an installed
+  browser (yt-dlp's `cookiesfrombrowser`), `google_connect_cookies_file`
+  imports a Netscape `cookies.txt`; both persist to
+  `~/.config/ritmo/cookies.txt` (mode 0600) which `_ydl` then passes as
+  `cookiefile` to every yt-dlp call (personalized results, Premium).
+  `fetch_account_info` hits the innertube `account_menu` endpoint with a
+  `SAPISIDHASH` Authorization header to get name/email;
+  `fetch_liked_songs` reads YouTube Music's `LM` playlist. The "Cuenta"
+  sidebar page hosts login controls and the liked-songs list.
 - **`Library`** — SQLite persistence (favorites, history/local scrobble) at
   `~/.local/share/ritmo/ritmo.db`; opens a connection per call so it is
   thread-safe.
