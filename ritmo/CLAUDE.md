@@ -69,6 +69,13 @@ Network functions can be tested headless from a Python one-liner
   YouTube "lockup view models", so liked songs / home playlists come back
   empty *without errors*. Needs a recent yt-dlp
   (`pip install --user --break-system-packages -U yt-dlp`).
+- **Playing with cookies needs a JS runtime**: modern yt-dlp resolves
+  YouTube's signature challenges with deno/node + the `yt-dlp-ejs` package
+  (`pip install --user --break-system-packages -U "yt-dlp[default]"`).
+  `_ydl` enables `js_runtimes: {deno, node}`; without a runtime,
+  cookie-authenticated extraction yields *no* audio formats ("Requested
+  format is not available"), so `_STREAM_CONFIGS` ends with a cookieless
+  fallback (`"cookiefile": None`) that guarantees playback.
 - **Chromium-family cookie import needs `python3-secretstorage`** (cookies are
   encrypted with the desktop keyring). `google_connect_browser` raises a
   friendly error if missing; Firefox doesn't need it. It's a `Recommends` in

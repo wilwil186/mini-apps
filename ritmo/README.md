@@ -49,8 +49,11 @@ sudo apt install python3-gi gir1.2-gtk-3.0 python3-requests yt-dlp ffmpeg \
 > que la lista de «Me gusta» de la cuenta de Google se llene (el de Debian
 > estable no parsea el formato nuevo de YouTube y devuelve una lista vacía):
 > ```bash
-> pip install --user --break-system-packages -U yt-dlp
+> pip install --user --break-system-packages -U "yt-dlp[default]"
 > ```
+> El extra `[default]` incluye `yt-dlp-ejs`, que junto a **node o deno**
+> resuelve los desafíos JavaScript de YouTube — necesario para reproducir con
+> la cuenta conectada (sin runtime JS, Ritmo recurre a reproducir sin cookies).
 
 ## 📦 Instalación con .deb (recomendado)
 

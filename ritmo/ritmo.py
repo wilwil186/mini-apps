@@ -181,13 +181,19 @@ class Library:
 # ---------------------------------------------------------------------------
 
 def _ydl(extra=None):
-    opts = {"quiet": True, "no_warnings": True, "noplaylist": True}
+    opts = {"quiet": True, "no_warnings": True, "noplaylist": True,
+            # Los clientes web de YouTube exigen resolver desafíos JS
+            # (firmas); yt-dlp moderno los resuelve con deno o node +
+            # yt-dlp-ejs. Las versiones viejas ignoran esta clave.
+            "js_runtimes": {"deno": {}, "node": {}}}
     # Con la cuenta de Google conectada, todas las peticiones a YouTube
     # llevan la sesión: resultados personalizados, Me gusta y Premium.
     if os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
     if extra:
         opts.update(extra)
+    if opts.get("cookiefile") is None:  # extra puede forzar modo anónimo
+        opts.pop("cookiefile", None)
     return yt_dlp.YoutubeDL(opts)
 
 
@@ -484,6 +490,10 @@ _STREAM_CONFIGS = [
     {"format": "bestaudio/best"},
     {"format": "bestaudio/best",
      "extractor_args": {"youtube": {"player_client": ["android"]}}},
+    # Último recurso: sin cookies. Con sesión iniciada, los clientes que
+    # aceptan cookies necesitan un runtime JS (deno/node); si falta, el
+    # modo anónimo usa otros clientes y garantiza la reproducción.
+    {"format": "bestaudio/best", "cookiefile": None},
 ]
 
 
