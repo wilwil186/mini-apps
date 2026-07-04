@@ -11,6 +11,11 @@ reproducción.
 
 ## ✨ Funciones
 
+- 🏠 **Inicio con recomendaciones** de YouTube Music (el mismo feed que la
+  portada de SimpMusic): «Selecciones rápidas», «Vuelve a escucharlo», mixes
+  personalizados, playlists de la comunidad… Personalizado con tu cuenta de
+  Google conectada; genérico si no. Activar un mix/playlist lo convierte en
+  tu cola de reproducción.
 - 🔍 **Búsqueda** de canciones y artistas en YouTube.
 - 👤 **Cuenta de Google** (como el login de SimpMusic): importa la sesión de tu
   navegador (Firefox, Chrome, Chromium, Brave…) o un `cookies.txt`, y Ritmo
@@ -51,7 +56,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 python3-requests yt-dlp ffmpeg \
 
 ```bash
 ./build.sh                              # necesita fakeroot + dpkg-deb
-sudo apt install ./ritmo_1.1.0_all.deb  # instala también las dependencias
+sudo apt install ./ritmo_1.2.0_all.deb  # instala también las dependencias
 ```
 
 Queda disponible como `ritmo` en la terminal y como **Ritmo** en el menú de
@@ -80,9 +85,9 @@ python3 ritmo.py   # o directamente desde el repositorio
 
 Ritmo es Python + GTK, tecnología de escritorio Linux: no se puede compilar a
 APK. El equivalente Android es el propio
-[fork de SimpMusic](https://github.com/wilwil186/SimpMusic), que ya publica un
-`SimpMusic-Android.apk` firmado en sus releases (y se puede compilar en local
-con `./gradlew androidApp:assembleDebug`).
+[fork de SimpMusic](https://github.com/wilwil186/SimpMusic). En este repo hay
+un APK debug universal ya compilado en [`../simpmusic-apk/`](../simpmusic-apk/),
+y se puede recompilar con `./gradlew androidApp:assembleDebug` en el fork.
 
 ## ⚖️ Aviso
 

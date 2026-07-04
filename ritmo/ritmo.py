@@ -35,7 +35,7 @@ import requests  # noqa: E402
 import yt_dlp  # noqa: E402
 
 APP_NAME = "Ritmo"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 DATA_DIR = os.path.join(GLib.get_user_data_dir(), "ritmo")
 DB_PATH = os.path.join(DATA_DIR, "ritmo.db")
@@ -50,6 +50,8 @@ RADIO_LIMIT = 25
 LIKED_LIMIT = 100
 LIKED_PLAYLIST_URL = "https://music.youtube.com/playlist?list=LM"
 ACCOUNT_MENU_API = "https://www.youtube.com/youtubei/v1/account/account_menu"
+MUSIC_BROWSE_API = "https://music.youtube.com/youtubei/v1/browse"
+PLAYLIST_LIMIT = 50
 LRCLIB_API = "https://lrclib.net/api/get"
 SPONSORBLOCK_API = "https://sponsor.ajay.app/api/skipSegments"
 SPONSORBLOCK_CATEGORIES = ["sponsor", "selfpromo", "music_offtopic"]
@@ -74,6 +76,16 @@ class Track:
     @property
     def watch_url(self):
         return f"https://www.youtube.com/watch?v={self.video_id}"
+
+
+@dataclass
+class PlaylistItem:
+    """Una lista/mix del feed de inicio de YouTube Music (no es una canción:
+    al activarla se resuelven sus pistas y se convierten en la cola)."""
+    playlist_id: str
+    title: str
+    subtitle: str = ""
+    thumb: str = ""
 
 
 def fmt_time(seconds):
@@ -267,6 +279,43 @@ def _find_key(obj, key):
     return None
 
 
+def _find_all(obj, key):
+    """Todas las apariciones de `key` en el JSON, en orden de documento."""
+    found = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == key:
+                found.append(v)
+            found.extend(_find_all(v, key))
+    elif isinstance(obj, list):
+        for v in obj:
+            found.extend(_find_all(v, key))
+    return found
+
+
+def _auth_session(origin="https://www.youtube.com"):
+    """Session de requests con las cookies guardadas y las cabeceras de
+    autenticación (SAPISIDHASH) que exige la API interna de YouTube.
+    Sin cuenta conectada devuelve una sesión anónima."""
+    session = requests.Session()
+    headers = {
+        "Origin": origin,
+        "X-Origin": origin,
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+    }
+    if account_connected():
+        jar = _load_cookie_jar(COOKIES_FILE)
+        # El SAPISID debe ser el de .youtube.com y las cookies deben viajar
+        # con su dominio (un dict aplanado hace que YouTube trate la
+        # petición como anónima), por eso se usa el jar completo.
+        session.cookies = jar
+        sapisid = next((c.value for c in jar if c.name == "SAPISID" and "youtube" in c.domain), None)
+        if sapisid:
+            headers["Authorization"] = _sapisidhash(sapisid, origin)
+            headers["X-Goog-AuthUser"] = "0"
+    return session, headers
+
+
 def _yt_text(node):
     if isinstance(node, dict):
         return node.get("simpleText") or "".join(r.get("text", "") for r in node.get("runs", []))
@@ -276,27 +325,14 @@ def _yt_text(node):
 def fetch_account_info():
     """Pide a la API interna de YouTube el nombre y correo de la sesión.
     Falla (RuntimeError) si las cookies no contienen una sesión iniciada."""
-    jar = _load_cookie_jar(COOKIES_FILE)
-    # El SAPISID debe ser el de .youtube.com y las cookies deben viajar con
-    # su dominio (un dict aplanado hace que YouTube trate la petición como
-    # anónima), por eso se usa una Session con el jar completo.
-    sapisid = next((c.value for c in jar if c.name == "SAPISID" and "youtube" in c.domain), None)
-    if not sapisid:
+    session, headers = _auth_session()
+    if "Authorization" not in headers:
         raise RuntimeError("no hay una sesión de Google iniciada en esas cookies")
-    session = requests.Session()
-    session.cookies = jar
-    origin = "https://www.youtube.com"
     r = session.post(
         ACCOUNT_MENU_API,
         params={"prettyPrint": "false"},
         json={"context": {"client": {"clientName": "WEB", "clientVersion": "2.20250101.00.00", "hl": "es"}}},
-        headers={
-            "Authorization": _sapisidhash(sapisid, origin),
-            "Origin": origin,
-            "X-Origin": origin,
-            "X-Goog-AuthUser": "0",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-        },
+        headers=headers,
         timeout=HTTP_TIMEOUT,
     )
     if r.status_code == 401:
@@ -313,6 +349,91 @@ def fetch_account_info():
     with open(ACCOUNT_FILE, "w", encoding="utf-8") as f:
         json.dump(account, f)
     return account
+
+
+def _parse_home_item(item):
+    """Convierte un elemento del feed de inicio en Track o PlaylistItem."""
+    r = item.get("musicResponsiveListItemRenderer")
+    if r:  # canción de «Quick picks» (fila con columnas)
+        video_id = _find_key(r, "videoId")
+        if not video_id:
+            return None
+        cols = r.get("flexColumns", [])
+        texts = [_yt_text(_find_key(c, "text")) for c in cols]
+        return Track(video_id=video_id,
+                     title=texts[0] if texts else "(sin título)",
+                     artist=texts[1] if len(texts) > 1 else "")
+    r = item.get("musicTwoRowItemRenderer")
+    if r:  # tarjeta: canción, mix o playlist
+        title = _yt_text(r.get("title"))
+        subtitle = _yt_text(r.get("subtitle"))
+        thumbs = _find_key(r.get("thumbnailRenderer", {}), "thumbnails") or []
+        thumb = thumbs[0].get("url", "") if thumbs else ""
+        nav = r.get("navigationEndpoint", {})
+        video_id = _find_key(nav.get("watchEndpoint", {}), "videoId")
+        if video_id:
+            return Track(video_id=video_id, title=title or "(sin título)", artist=subtitle)
+        playlist_id = _find_key(nav, "playlistId") or ""
+        browse_id = _find_key(nav, "browseId") or ""
+        if browse_id.startswith("VL"):
+            playlist_id = browse_id[2:]
+        if playlist_id:
+            return PlaylistItem(playlist_id=playlist_id, title=title or "(lista)",
+                                subtitle=subtitle, thumb=thumb)
+    return None
+
+
+def fetch_home(max_rounds=4):
+    """Feed de inicio de YouTube Music (FEmusic_home): las mismas secciones
+    que muestra SimpMusic — «Selecciones rápidas», mixes, playlists de la
+    comunidad… Personalizado si hay cuenta conectada; genérico si no.
+    El feed llega paginado: se siguen hasta `max_rounds` continuaciones.
+    Devuelve [{'title': str, 'items': [Track | PlaylistItem]}]."""
+    origin = "https://music.youtube.com"
+    session, headers = _auth_session(origin)
+    context = {"context": {"client": {"clientName": "WEB_REMIX",
+                                      "clientVersion": "1.20250101.01.00", "hl": "es"}}}
+    sections = []
+    params = {"prettyPrint": "false"}
+    body = {"browseId": "FEmusic_home", **context}
+    for _round in range(max_rounds):
+        r = session.post(MUSIC_BROWSE_API, params=params, json=body,
+                         headers=headers, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+        for shelf in _find_all(data, "musicCarouselShelfRenderer"):
+            title = _yt_text(_find_key(shelf.get("header", {}), "title"))
+            items = [it for it in (_parse_home_item(i) for i in shelf.get("contents", [])) if it]
+            if items:
+                sections.append({"title": title or "Recomendado", "items": items})
+        cont = _find_key(data, "nextContinuationData")
+        if not cont or not cont.get("continuation"):
+            break
+        token = cont["continuation"]
+        params = {"prettyPrint": "false", "ctoken": token,
+                  "continuation": token, "type": "next"}
+        body = context
+    return sections
+
+
+def fetch_playlist_tracks(playlist_id):
+    """Resuelve las pistas de una lista/mix del feed (para usarla de cola)."""
+    urls = [f"https://music.youtube.com/playlist?list={playlist_id}",
+            f"https://music.youtube.com/watch?list={playlist_id}"]
+    last_err = None
+    for url in urls:
+        try:
+            with _ydl({"extract_flat": True, "noplaylist": False,
+                       "playlistend": PLAYLIST_LIMIT}) as ydl:
+                info = ydl.extract_info(url, download=False)
+            tracks = [_entry_to_track(e) for e in info.get("entries") or [] if e.get("id")]
+            if tracks:
+                return tracks
+        except yt_dlp.utils.DownloadError as exc:
+            last_err = exc
+    if last_err:
+        raise last_err
+    return []
 
 
 def google_connect_browser(browser):
@@ -664,6 +785,42 @@ class TrackRow(Gtk.ListBoxRow):
         self.fav_btn.set_image(img)
 
 
+class PlaylistRow(Gtk.ListBoxRow):
+    """Fila de lista/mix del feed de inicio: al activarla, sus pistas se
+    convierten en la cola de reproducción."""
+
+    def __init__(self, item: PlaylistItem):
+        super().__init__()
+        self.playlist = item
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+
+        self.thumb = Gtk.Image.new_from_icon_name("media-playlist-consecutive-symbolic", Gtk.IconSize.DIALOG)
+        self.thumb.set_size_request(64, 48)
+        box.pack_start(self.thumb, False, False, 0)
+        if item.thumb:
+            THUMBS.get(item.thumb, 48, self.thumb.set_from_pixbuf)
+
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        title = Gtk.Label(label=item.title, xalign=0)
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        subtitle = Gtk.Label(label=item.subtitle or "Lista de reproducción", xalign=0)
+        subtitle.set_ellipsize(Pango.EllipsizeMode.END)
+        subtitle.get_style_context().add_class("dim-label")
+        labels.pack_start(title, False, False, 0)
+        labels.pack_start(subtitle, False, False, 0)
+        box.pack_start(labels, True, True, 0)
+
+        play = Gtk.Image.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.BUTTON)
+        box.pack_start(play, False, False, 0)
+
+        self.add(box)
+        self.show_all()
+
+
 # ---------------------------------------------------------------------------
 # Aplicación principal
 # ---------------------------------------------------------------------------
@@ -725,6 +882,7 @@ class RitmoApp:
         body.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 0)
         body.pack_start(self.stack, True, True, 0)
 
+        self._build_home_page()
         self.search_list = self._make_track_list("search", "Buscar")
         self.fav_list = self._make_track_list("favorites", "Favoritos")
         self.hist_list = self._make_track_list("history", "Historial")
@@ -755,6 +913,7 @@ class RitmoApp:
         self.win.show_all()
         self.lyrics_revealer.set_reveal_child(False)
         self._update_account_ui()
+        self._load_home()  # «Inicio» es la página inicial
 
     def _make_track_list(self, name, title):
         scroll = Gtk.ScrolledWindow()
@@ -771,6 +930,16 @@ class RitmoApp:
         self.dl_list.set_selection_mode(Gtk.SelectionMode.NONE)
         scroll.add(self.dl_list)
         self.stack.add_titled(scroll, "downloads", "Descargas")
+
+    def _build_home_page(self):
+        scroll = Gtk.ScrolledWindow()
+        self.home_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        for setter in (self.home_box.set_margin_top, self.home_box.set_margin_bottom,
+                       self.home_box.set_margin_start, self.home_box.set_margin_end):
+            setter(10)
+        scroll.add(self.home_box)
+        self._home_loaded = False
+        self.stack.add_titled(scroll, "home", "Inicio")
 
     def _build_account_page(self):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -918,6 +1087,9 @@ class RitmoApp:
             self._fill_list(self.queue_list, self.queue)
         elif name == "downloads":
             self._refresh_downloads()
+        elif name == "home":
+            if not self._home_loaded:
+                self._load_home()
         elif name == "account":
             self._update_account_ui()
             if account_connected() and not self._liked_loaded:
@@ -948,6 +1120,69 @@ class RitmoApp:
             row.set_margin_top(4)
             self.dl_list.add(row)
         self.dl_list.show_all()
+
+    # -- Inicio (recomendaciones de YouTube Music) -----------------------------
+
+    def _load_home(self):
+        for child in self.home_box.get_children():
+            self.home_box.remove(child)
+        loading = Gtk.Label(label="Cargando recomendaciones…")
+        loading.set_margin_top(24)
+        self.home_box.pack_start(loading, False, False, 0)
+        self.home_box.show_all()
+        self.status("Cargando recomendaciones de YouTube Music…")
+        run_async(fetch_home, self._on_home)
+
+    def _on_home(self, sections, err):
+        for child in self.home_box.get_children():
+            self.home_box.remove(child)
+        if err or not sections:
+            msg = f"No se pudo cargar el inicio: {err}" if err else "El feed de inicio llegó vacío."
+            lbl = Gtk.Label(label=msg)
+            lbl.set_line_wrap(True)
+            lbl.set_margin_top(24)
+            self.home_box.pack_start(lbl, False, False, 0)
+            self.home_box.show_all()
+            self.status(msg)
+            return
+        self._home_loaded = True
+        if not account_connected():
+            hint = Gtk.Label(xalign=0)
+            hint.set_markup("<small>Recomendaciones genéricas — conecta tu cuenta de Google "
+                            "en «Cuenta» para verlas personalizadas.</small>")
+            hint.set_line_wrap(True)
+            self.home_box.pack_start(hint, False, False, 0)
+        for section in sections:
+            header = Gtk.Label(xalign=0)
+            header.set_markup(f"<b>{GLib.markup_escape_text(section['title'])}</b>")
+            header.set_margin_top(8)
+            self.home_box.pack_start(header, False, False, 0)
+            listbox = Gtk.ListBox()
+            listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+            listbox.connect("row-activated", self._on_row_activated, "home")
+            for item in section["items"]:
+                if isinstance(item, Track):
+                    listbox.add(TrackRow(item, self))
+                else:
+                    listbox.add(PlaylistRow(item))
+            self.home_box.pack_start(listbox, False, False, 0)
+        self.home_box.show_all()
+        self.status(f"Inicio: {len(sections)} secciones recomendadas")
+
+    def play_playlist(self, item: PlaylistItem):
+        self.status(f"Cargando «{item.title}»…")
+        run_async(fetch_playlist_tracks, lambda r, e: self._on_playlist_tracks(item, r, e),
+                  item.playlist_id)
+
+    def _on_playlist_tracks(self, item, tracks, err):
+        if err or not tracks:
+            self.status(f"No se pudo cargar «{item.title}»: {err or 'lista vacía'}")
+            return
+        self.queue = tracks
+        self.queue_pos = 0
+        if self.stack.get_visible_child_name() == "queue":
+            self._refresh_current_page()
+        self.play_track(tracks[0])
 
     # -- Cuenta de Google ------------------------------------------------------
 
@@ -995,10 +1230,12 @@ class RitmoApp:
         self._update_account_ui()
         self.status(f"Cuenta de Google conectada: {account.get('name')} ✓")
         self._load_liked()
+        self._home_loaded = False  # el inicio pasa a ser personalizado
 
     def _on_google_logout(self, _btn):
         google_logout()
         self._liked_loaded = False
+        self._home_loaded = False
         self._fill_list(self.liked_list, [])
         self._update_account_ui()
         self.status("Sesión de Google cerrada")
@@ -1039,6 +1276,9 @@ class RitmoApp:
     def _on_row_activated(self, listbox, row, page_name):
         """Doble propósito: reproduce la fila y convierte la lista visible
         en la cola de reproducción (como en SimpMusic)."""
+        if isinstance(row, PlaylistRow):
+            self.play_playlist(row.playlist)
+            return
         tracks = [r.track for r in listbox.get_children() if isinstance(r, TrackRow)]
         if page_name != "queue":
             self.queue = tracks

@@ -4,7 +4,7 @@
 set -e
 
 NAME="ritmo"
-VERSION="1.1.0"
+VERSION="1.2.0"
 ARCH="all"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$(mktemp -d "/tmp/${NAME}-build-XXXXXX")"

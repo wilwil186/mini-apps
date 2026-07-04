@@ -1,5 +1,5 @@
 Package: ritmo
-Version: 1.1.0
+Version: 1.2.0
 Section: sound
 Priority: optional
 Architecture: all
@@ -12,6 +12,8 @@ Description: Reproductor de música de YouTube sin anuncios para Linux
  directo y GStreamer lo reproduce (nunca se carga el reproductor web).
  .
  Características:
+  * Página de inicio con recomendaciones de YouTube Music (mixes,
+    selecciones rápidas, playlists de la comunidad)
   * Búsqueda de canciones y artistas en YouTube
   * Cuenta de Google: importa la sesión del navegador para ver tus
     "Me gusta" de YouTube Music, resultados personalizados y Premium

@@ -34,12 +34,24 @@ Reproductor de **música de YouTube sin anuncios** (GTK), inspirado en
 con `yt-dlp` y lo reproduce con GStreamer, así que no hay anuncios en la cadena
 de reproducción.
 
+- **Inicio con recomendaciones** de YouTube Music (mixes, selecciones rápidas,
+  playlists de la comunidad), personalizado con tu cuenta.
+- **Cuenta de Google**: importa la sesión del navegador (como SimpMusic) para
+  ver tus «Me gusta», recomendaciones personalizadas y Premium.
 - Búsqueda en YouTube, favoritos e historial (SQLite).
 - **Radio infinita** con el Mix de YouTube al agotarse la cola.
 - **Letras sincronizadas** (LRCLIB) resaltadas en tiempo real.
 - **SponsorBlock** (salta segmentos que no son música) y temporizador de sueño.
 - Descargas en `m4a` con carátula y metadatos a `~/Música/Ritmo`.
 - Escrito en **Python 3** (`PyGObject` + `yt-dlp` + GStreamer).
+- Empaquetado como `.deb` (`ritmo/build.sh`).
+
+Versión actual: **1.2.0**
+
+### 📱 simpmusic-apk
+APK **debug universal de Android** del
+[fork de SimpMusic](https://github.com/wilwil186/SimpMusic) — el equivalente
+Android de Ritmo — listo para instalar en el móvil.
 
 ## Estructura
 
@@ -47,5 +59,6 @@ de reproducción.
 mini-apps/
 ├── mouse-jiggler/      # Jiggler de ratón con GUI y empaquetado .deb/.rpm
 ├── crypto-indicator/   # Indicador de bandeja con el Top 20 de criptos
-└── ritmo/              # Reproductor de música de YouTube sin anuncios
+├── ritmo/              # Reproductor de música de YouTube sin anuncios (.deb)
+└── simpmusic-apk/      # APK Android compilado del fork de SimpMusic
 ```

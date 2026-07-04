@@ -11,6 +11,9 @@ packaging — they share no code. Add new apps as sibling directories.
 - `mouse-jiggler/` — Bash daemon that moves the mouse to prevent screen lock/suspend, packaged as `.deb`.
 - `crypto-indicator/` — Python 3 GTK tray indicator showing the CoinGecko Top 20 cryptos.
 - `ritmo/` — Python 3 GTK ad-free YouTube music player inspired by SimpMusic.
+- `simpmusic-apk/` — prebuilt Android debug APK of the user's SimpMusic fork
+  (`~/Documentos/SimpMusic`, github.com/wilwil186/SimpMusic); not source code,
+  just the artifact + build instructions.
 
 ## mouse-jiggler
 
@@ -97,6 +100,14 @@ Key pieces, all in `ritmo.py`:
   `SAPISIDHASH` Authorization header to get name/email;
   `fetch_liked_songs` reads YouTube Music's `LM` playlist. The "Cuenta"
   sidebar page hosts login controls and the liked-songs list.
+- **Home feed** — `fetch_home` browses innertube `FEmusic_home`
+  (WEB_REMIX client, follows pagination continuations) and returns sections
+  of `Track`/`PlaylistItem`; personalized when logged in, generic otherwise.
+  The "Inicio" page (first in the sidebar, loaded on startup) renders them;
+  activating a `PlaylistRow` resolves the playlist via `fetch_playlist_tracks`
+  (yt-dlp flat) and makes it the queue. Note: liked songs / home playlists
+  need a recent yt-dlp — Debian stable's can't parse YouTube's lockup view
+  models and returns empty lists.
 - **`Library`** — SQLite persistence (favorites, history/local scrobble) at
   `~/.local/share/ritmo/ritmo.db`; opens a connection per call so it is
   thread-safe.
